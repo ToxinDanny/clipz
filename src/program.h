@@ -12,10 +12,11 @@ BOOL CopyMode = FALSE;
 BOOL StackMode = FALSE;
 MemArena* ClipzArena;
 HKMap* ClipzHKMap;
-KV** ClipzStack;
+char** ClipzStack;
+short stack_counter = 0;
 HHOOK hHook = NULL;
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
-char* GetSelectedText();
+char* Copy();
 BOOL SaveOnHotkeyMap(HKMap* map, char key, char* value);
 BOOL PasteFromHotkeyMap(HKMap* map, char key);

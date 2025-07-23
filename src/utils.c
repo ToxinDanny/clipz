@@ -2,6 +2,7 @@
 // TODO: redo
 
 #include "utils.h"
+#include <stdio.h>
 
 BOOL SetClipboardText(const char* text) {
     if (!OpenClipboard(NULL))
@@ -60,4 +61,49 @@ char* GetClipboardText() {
     CloseClipboard();
 
     return pszTextUTF8;
+}
+
+char* Copy() {
+
+    INPUT inputs[4] = { 0 };
+
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = VK_CONTROL;
+
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = 'C';
+
+    inputs[2].type = INPUT_KEYBOARD;
+    inputs[2].ki.wVk = 'C';
+    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+
+    inputs[3].type = INPUT_KEYBOARD;
+    inputs[3].ki.wVk = VK_CONTROL;
+    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+
+    SendInput(4, inputs, sizeof(INPUT));
+    Sleep(80);
+
+    return GetClipboardText();
+}
+
+void Paste() {
+
+    INPUT inputs[4] = { 0 };
+
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = VK_CONTROL;
+
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = 'V';
+
+    inputs[2].type = INPUT_KEYBOARD;
+    inputs[2].ki.wVk = 'V';
+    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+
+    inputs[3].type = INPUT_KEYBOARD;
+    inputs[3].ki.wVk = VK_CONTROL;
+    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+
+    SendInput(4, inputs, sizeof(INPUT));
 }

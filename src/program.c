@@ -3,29 +3,31 @@
 /*
     1) CopyMode:
         - Activates copy mode with Ctrl+Alt+A 
-            -> Copy on Ctrl+<NUMPAD 1-9> 
+        - Copy on Ctrl+<NUMPAD 1-9> 
         - Paste from corresponding Ctrl+<NUMPAD 1-9>
 
-    2) Quit -> Ctrl+Alt+Q
+    2) Quit: Ctrl+Alt+Q
+        - Closes the application
 
-    3) Print -> Ctrl+Alt+P:
-        - Print on console the hotkeys' map
+    3) Print: Ctrl+Alt+P
+        - Print on console the hotkeys
 
-    4) (TODO) StackMode: 
-        - Activates stack copy with Ctrl+Alt+S 
-            -> Copy on Ctrl+0 n-times
-        - Paste LIFO 
+    4) StackMode: Ctrl+Alt+S (toggle on) -> Ctrl+0 (n-copies) -> Ctrl+Alt+S (toggle off) -> Ctrl+0 (n-paste)
+        - Activates stack copy mode with Ctrl+Alt+S
+        - Copy on Ctrl+0 n-times
+        - Deactivates stack copy mode with Ctrl+Alt+S
+        - Paste from Ctrl+0 n-times, LIFO style
 
-    5) (TODO) TemplateMode: 
+    5) (TODO) TemplateMode: Ctrl+Alt+T -> Ctrl+<1-9> (copy template) -> Ctrl+Alt+A -> Ctrl+<NUMPAD 1-9> (copy text) ->
+                            Ctrl+<1-9> -> Ctrl+<NUMPAD 1-9> (paste composed text)
         - Activates with Ctrl+Alt+T 
-            -> Copy template (string with placeholder '%') on Ctrl+<1-9> 
-            -> Copy text on Ctrl+<NUMPAD 1-9>
+        - Copy template (string with placeholder '%') on Ctrl+<1-9> 
+        - Copy text in copy mode on Ctrl+<NUMPAD 1-9>
         - Paste from corresponding Ctrl+<1-9> && Ctrl+<NUMPAD 1-9>
 
-    6) (TODO) Refactoring; Better error handling; Better arena and data structures 
+    6) (TODO) Refactoring; Improve error handling; Improve arena and data structures 
 
     7) (NICE TO HAVE) Packaging app as background service && windows service tag 
-
 */
 
 int main() {
@@ -45,11 +47,17 @@ int main() {
         return -1;
     }
 
+    if (!RegisterHotKey(NULL, 4, MOD_CONTROL | MOD_ALT, 'S')) {
+        fprintf(stderr, "Error: Hotkey impossible to register. (errno = %d)\n", GetLastError());
+        return -1;
+    }
+
     ClipzArena = create_arena(MB_16, DEF_ALIGN);
     assert(ClipzArena != NULL);
 
     ClipzHKMap = (HKMap*)enter_the_arena(ClipzArena, sizeof(HKMap));
     ClipzHKMap->kv = (KV*)enter_the_arena(ClipzArena, 10 * sizeof(KV));
+    ClipzStack = enter_the_arena(ClipzArena, sizeof(char*));
 
     BOOL shutdown = FALSE;
 
@@ -81,7 +89,8 @@ int main() {
             }
 
             if (msg.message == WM_HOTKEY && msg.wParam == 4) {
-                StackMode = TRUE;
+                StackMode = !StackMode;
+                printf("Stack Mode %s\n", StackMode ? "on" : "off");
             }
         }
 
@@ -91,6 +100,7 @@ int main() {
     UnregisterHotKey(NULL, 1);
     UnregisterHotKey(NULL, 2);
     UnregisterHotKey(NULL, 3);
+    UnregisterHotKey(NULL, 4);
     destroy_arena(ClipzArena);
     return 0;
 }
@@ -118,11 +128,25 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 char key = (char)('1' + (p->vkCode - VK_NUMPAD1));
 
                 if (CopyMode) {
-                    SaveOnHotkeyMap(ClipzHKMap, key, GetSelectedText());
+                    SaveOnHotkeyMap(ClipzHKMap, key, Copy());
                     CopyMode = FALSE;
                 }
                 else {
                     PasteFromHotkeyMap(ClipzHKMap, key);
+                }
+
+                return 1;
+            }
+
+            if (p->vkCode == VK_NUMPAD0) {
+
+                if (StackMode) {
+                    stack_counter++;
+                    SaveOnStack(ClipzStack, Copy(), stack_counter);
+                }
+                else {
+                    if (stack_counter != 0)
+                        PasteFromStack(ClipzStack, &stack_counter);
                 }
 
                 return 1;
@@ -149,30 +173,6 @@ BOOL SaveOnHotkeyMap(HKMap* map, char key, char* value) {
     return res;
 }
 
-char* GetSelectedText() {
-
-    INPUT inputs[4] = { 0 };
-
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wVk = VK_CONTROL;
-
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wVk = 'C';
-
-    inputs[2].type = INPUT_KEYBOARD;
-    inputs[2].ki.wVk = 'C';
-    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
-
-    inputs[3].type = INPUT_KEYBOARD;
-    inputs[3].ki.wVk = VK_CONTROL;
-    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-
-    SendInput(4, inputs, sizeof(INPUT));
-    Sleep(80); 
-
-    return GetClipboardText();
-}
-
 BOOL PasteFromHotkeyMap(HKMap* map, char key) {
 
     KV kv = { 0 };
@@ -184,22 +184,35 @@ BOOL PasteFromHotkeyMap(HKMap* map, char key) {
         return FALSE;
     }
 
-    INPUT inputs[4] = { 0 };
+    Paste();
 
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wVk = VK_CONTROL;
+    return TRUE;
+}
 
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wVk = 'V';
+BOOL SaveOnStack(char** stack, char* text, short sc) {
+    
+    if (stack == NULL || text == NULL || strcmp(text, "") == 0 || strcmp(text, " ") == 0)
+        return FALSE;
 
-    inputs[2].type = INPUT_KEYBOARD;
-    inputs[2].ki.wVk = 'V';
-    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    size_t text_size = strlen(text) + 1;
+    stack[sc - 1] = (char*)enter_the_arena(ClipzArena, text_size);
+    memcpy(stack[sc - 1], text, text_size);
 
-    inputs[3].type = INPUT_KEYBOARD;
-    inputs[3].ki.wVk = VK_CONTROL;
-    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    printf("Stack %d: %s\n", sc - 1, text);
 
-    SendInput(4, inputs, sizeof(INPUT));
+    return TRUE;
+}
+
+BOOL PasteFromStack(char** stack, short* sc) {
+
+    if (stack == NULL || stack[*sc - 1] == NULL || !SetClipboardText(stack[*sc - 1])) {
+        return FALSE;
+    }
+
+    Paste();
+
+    stack = stack + 1;
+    (*sc)--;
+
     return TRUE;
 }
