@@ -52,12 +52,18 @@ int main() {
         return -1;
     }
 
+    if (!RegisterHotKey(NULL, 5, MOD_CONTROL | MOD_ALT, 'T')) {
+        fprintf(stderr, "Error: Hotkey impossible to register. (errno = %d)\n", GetLastError());
+        return -1;
+    }
+
     ClipzArena = create_arena(MB_16, DEF_ALIGN);
     assert(ClipzArena != NULL);
 
     ClipzHKMap = (HKMap*)enter_the_arena(ClipzArena, sizeof(HKMap));
     ClipzHKMap->kv = (KV*)enter_the_arena(ClipzArena, 10 * sizeof(KV));
     ClipzStack = enter_the_arena(ClipzArena, sizeof(char*));
+    ClipzTemplates = enter_the_arena(ClipzArena, sizeof(char*));
 
     BOOL shutdown = FALSE;
 
@@ -76,7 +82,10 @@ int main() {
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
 
             if (msg.message == WM_HOTKEY && msg.wParam == 1) {
-                CopyMode = TRUE;
+
+                if (TemplateMode != TActive) {
+                    CopyMode = TRUE;
+                }
             }
 
             if (msg.message == WM_HOTKEY && msg.wParam == 2) {
@@ -92,6 +101,27 @@ int main() {
                 StackMode = !StackMode;
                 printf("Stack Mode %s\n", StackMode ? "on" : "off");
             }
+
+            if (msg.message == WM_HOTKEY && msg.wParam == 5) {
+
+                switch (TemplateMode) {
+
+                    case TNotEnabled: 
+                        TemplateMode = TEnabled;
+                        printf("Template Mode on\n");
+                        break;
+
+                    case TEnabled:
+                        TemplateMode = TActive;
+                        break;
+
+                    default:
+                        TemplateMode = TNotEnabled;
+                        printf("Template Mode off\n");
+                        break;
+                }
+
+            }
         }
 
         Sleep(10);
@@ -101,7 +131,9 @@ int main() {
     UnregisterHotKey(NULL, 2);
     UnregisterHotKey(NULL, 3);
     UnregisterHotKey(NULL, 4);
+    UnregisterHotKey(NULL, 5);
     destroy_arena(ClipzArena);
+
     return 0;
 }
 
@@ -123,6 +155,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
         if (wParam == WM_KEYDOWN && ctrlDown) {
 
+            // COPY MODE
             if (p->vkCode >= VK_NUMPAD1 && p->vkCode <= VK_NUMPAD9) {
                     
                 char key = (char)('1' + (p->vkCode - VK_NUMPAD1));
@@ -131,13 +164,17 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     SaveOnHotkeyMap(ClipzHKMap, key, Copy());
                     CopyMode = FALSE;
                 }
+                else if (TemplateMode == TActive) {
+                    hk_actual_key = key;
+                }
                 else {
                     PasteFromHotkeyMap(ClipzHKMap, key);
                 }
 
                 return 1;
-            }
+            }   
 
+            // STACK MODE
             if (p->vkCode == VK_NUMPAD0) {
 
                 if (StackMode) {
@@ -145,10 +182,27 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     SaveOnStack(ClipzStack, Copy(), stack_counter);
                 }
                 else {
-                    if (stack_counter != 0)
+                    if (stack_counter != 0) {
                         PasteFromStack(ClipzStack, &stack_counter);
+                    }
                 }
 
+                return 1;
+            }
+
+            // TEMPLATE MODE
+            if (p->vkCode >= '1' && p->vkCode <= '9') {
+
+                if (TemplateMode == TEnabled) {
+                    SaveOnTemplateList(ClipzTemplates, p->vkCode, Copy());
+                }
+                else if (TemplateMode == TActive) {
+                    KV* kv = (KV*)enter_the_arena(ClipzArena, sizeof(KV));
+                    try_get(ClipzHKMap, hk_actual_key, kv);
+                    PasteFromTemplateList(ClipzTemplates, p->vkCode, kv->value);
+                    TemplateMode = TEnabled;
+                }
+                
                 return 1;
             }
         }
@@ -213,6 +267,51 @@ BOOL PasteFromStack(char** stack, short* sc) {
 
     stack = stack + 1;
     (*sc)--;
+
+    return TRUE;
+}
+
+BOOL SaveOnTemplateList(char** templates, char key, char* text) {
+
+    if (templates == NULL || text == NULL || strcmp(text, "") == 0 || strcmp(text, " ") == 0)
+        return FALSE;
+
+    int i = (int)key - 48;
+    size_t text_size = strlen(text) + 1;
+    templates[i - 1] = (char*)enter_the_arena(ClipzArena, text_size);
+    memcpy(templates[i - 1], text, text_size);
+
+    printf("Template %d: %s\n", i - 1, text);
+
+    return TRUE;
+}
+
+BOOL PasteFromTemplateList(char** templates, char key, char* text) {
+
+    if (templates == NULL || text == NULL || strcmp(text, "") == 0 || strcmp(text, " ") == 0)
+        return FALSE;
+
+    char* templ = templates[(int)key - '1'];
+    char* pos = strchr(templ, '%');
+
+    if (pos == NULL)
+        return FALSE;
+
+    int pos_i = pos - templ;
+    int len = strlen(templ) + strlen(text);
+    char* result = (char*)enter_the_arena(ClipzArena, len + 1);
+
+    strncpy(result, templ, pos_i);
+    result[pos_i] = '\0';
+
+    strcat(result, text);
+    strcat(result, templ + pos_i + 1);
+
+    if (!SetClipboardText(result)) {
+        return FALSE;
+    }
+
+    Paste();
 
     return TRUE;
 }
