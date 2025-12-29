@@ -1,9 +1,9 @@
-﻿#include "program.h"
+#include "program.h"
 
 /*
     1) CopyMode:
-        - Activates copy mode with Ctrl+Alt+A 
-        - Copy on Ctrl+<NUMPAD 1-9> 
+        - Activates copy mode with Ctrl+Alt+A
+        - Copy on Ctrl+<NUMPAD 1-9>
         - Paste from corresponding Ctrl+<NUMPAD 1-9>
 
     2) Quit: Ctrl+Alt+Q
@@ -20,14 +20,14 @@
 
     5) (TODO) TemplateMode: Ctrl+Alt+T -> Ctrl+<1-9> (copy template) -> Ctrl+Alt+A -> Ctrl+<NUMPAD 1-9> (copy text) ->
                             Ctrl+<1-9> -> Ctrl+<NUMPAD 1-9> (paste composed text)
-        - Activates with Ctrl+Alt+T 
-        - Copy template (string with placeholder '%') on Ctrl+<1-9> 
+        - Activates with Ctrl+Alt+T
+        - Copy template (string with placeholder '%') on Ctrl+<1-9>
         - Copy text in copy mode on Ctrl+<NUMPAD 1-9>
         - Paste from corresponding Ctrl+<1-9> && Ctrl+<NUMPAD 1-9>
 
-    6) (TODO) Refactoring; Improve error handling; Improve arena and data structures 
+    6) (TODO) Refactoring; Improve error handling; Improve arena and data structures
 
-    7) (NICE TO HAVE) Packaging app as background service && windows service tag 
+    7) (NICE TO HAVE) Packaging app as background service && windows service tag
 */
 
 int main() {
@@ -106,7 +106,7 @@ int main() {
 
                 switch (TemplateMode) {
 
-                    case TNotEnabled: 
+                    case TNotEnabled:
                         TemplateMode = TEnabled;
                         printf("Template Mode on\n");
                         break;
@@ -155,27 +155,32 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
         if (wParam == WM_KEYDOWN && ctrlDown) {
 
-            // COPY MODE
-            if (p->vkCode >= VK_NUMPAD1 && p->vkCode <= VK_NUMPAD9) {
-                    
-                char key = (char)('1' + (p->vkCode - VK_NUMPAD1));
+            if (p->vkCode >= '1' && p->vkCode <= '9') {
+
+                char key = (char)p->vkCode;
 
                 if (CopyMode) {
                     SaveOnHotkeyMap(ClipzHKMap, key, Copy());
                     CopyMode = FALSE;
                 }
+                else if (TemplateMode == TEnabled) {
+                    SaveOnTemplateList(ClipzTemplates, p->vkCode, Copy());
+                }
                 else if (TemplateMode == TActive) {
                     hk_actual_key = key;
+                    KV* kv = (KV*)enter_the_arena(ClipzArena, sizeof(KV));
+                    try_get(ClipzHKMap, hk_actual_key, kv);
+                    PasteFromTemplateList(ClipzTemplates, p->vkCode, kv->value);
+                    TemplateMode = TEnabled;
                 }
                 else {
                     PasteFromHotkeyMap(ClipzHKMap, key);
                 }
 
                 return 1;
-            }   
+            }
 
-            // STACK MODE
-            if (p->vkCode == VK_NUMPAD0) {
+            if (p->vkCode == '0') {
 
                 if (StackMode) {
                     stack_counter++;
@@ -190,21 +195,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 return 1;
             }
 
-            // TEMPLATE MODE
-            if (p->vkCode >= '1' && p->vkCode <= '9') {
-
-                if (TemplateMode == TEnabled) {
-                    SaveOnTemplateList(ClipzTemplates, p->vkCode, Copy());
-                }
-                else if (TemplateMode == TActive) {
-                    KV* kv = (KV*)enter_the_arena(ClipzArena, sizeof(KV));
-                    try_get(ClipzHKMap, hk_actual_key, kv);
-                    PasteFromTemplateList(ClipzTemplates, p->vkCode, kv->value);
-                    TemplateMode = TEnabled;
-                }
-                
-                return 1;
-            }
         }
     }
 
@@ -244,7 +234,7 @@ BOOL PasteFromHotkeyMap(HKMap* map, char key) {
 }
 
 BOOL SaveOnStack(char** stack, char* text, short sc) {
-    
+
     if (stack == NULL || text == NULL || strcmp(text, "") == 0 || strcmp(text, " ") == 0)
         return FALSE;
 
